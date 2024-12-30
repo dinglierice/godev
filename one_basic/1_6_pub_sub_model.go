@@ -1,6 +1,7 @@
 package one_basic
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,11 +32,11 @@ func NewPublisher(buffer int, timeout time.Duration) *Publisher {
 
 // AddSubscriber 添加不限定主题的订阅者
 func (p *Publisher) AddSubscriber(topicName string) (*Subscriber, error) {
-	return p.AddSubscriberWithTopic(nil, topicName)
+	return p.AddSubscriberWithTopic(topicName, nil)
 }
 
 // AddSubscriberWithTopic 添加限定主题的订阅者
-func (p *Publisher) AddSubscriberWithTopic(topic TopicFunc, topicName string) (*Subscriber, error) {
+func (p *Publisher) AddSubscriberWithTopic(topicName string, topic TopicFunc) (*Subscriber, error) {
 	ch := make(chan any, p.buffer)
 	s := &Subscriber{
 		name: topicName,
@@ -97,4 +98,34 @@ func (p *Publisher) Send(subscriber *Subscriber, topicFunc TopicFunc, v any, wg 
 	case subscriber.flow <- v:
 	case <-time.After(p.timeout):
 	}
+}
+
+func main() {
+	pub := NewPublisher(1000, 1000*time.Millisecond)
+	defer pub.Close()
+
+	all, _ := pub.AddSubscriber("All")
+	golang, _ := pub.AddSubscriberWithTopic("Golang", func(v any) bool {
+		if s, ok := v.(string); ok {
+			return strings.Contains(s, "Golang")
+		}
+		return false
+	})
+
+	pub.Publish("Hello World")
+	pub.Publish("Hello Golang")
+
+	go func() {
+		for v := range all.flow {
+			println("all 's msgs:", v.(string))
+		}
+	}()
+
+	go func() {
+		for v := range golang.flow {
+			println("golang's msgss:", v.(string))
+		}
+	}()
+
+	time.Sleep(3 * time.Second)
 }

@@ -6,6 +6,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/tools/godoc/vfs"
+	"golang.org/x/tools/godoc/vfs/gatefs"
 )
 
 // TestConcurrentModelWithMutex 并发编程的核心概念是同步通信，但是同步的方式却有多种
@@ -103,3 +106,46 @@ func TestProducerConsumer(t *testing.T) {
 }
 
 // publisher subscriber model
+// see 1_6_pub_sub_model.go
+
+// control concurrency
+func TestControllConcurrency(t *testing.T) {
+	// 带有最大并发阻塞的虚拟文件系统
+	fs := gatefs.New(vfs.OS("/path"), make(chan bool, 8))
+	fs.Open("/path/file")
+}
+
+func GenerateNatural() chan int {
+	ch := make(chan int)
+	go func() {
+		for i := 2; ; i++ {
+			ch <- i
+		}
+	}()
+	return ch
+}
+
+func PrimeFilter(in <-chan int, prime int) chan int {
+	out := make(chan int)
+	go func() {
+		// 持续消费提供的管道
+		for {
+			if i := <-in; i%prime != 0 {
+				out <- i
+			}
+		}
+	}()
+	return out
+}
+
+// 我们先是调用 GenerateNatural() 生成最原始的从 2 开始的自然数序列。
+// 然后开始一个 100 次迭代的循环，希望生成 100 个素数。在每次循环迭代开始的时候，管道中的第一个数必定是素数，我们先读取并打印这个素数。
+// 然后基于管道中剩余的数列，并以当前取出的素数为筛子过滤后面的素数。不同的素数筛子对应的管道是串联在一起的。
+func TestPrimeFilter(t *testing.T) {
+	ch := GenerateNatural()
+	for i := 0; i < 100; i++ {
+		prime := <-ch
+		fmt.Println(prime)
+		ch = PrimeFilter(ch, prime)
+	}
+}
