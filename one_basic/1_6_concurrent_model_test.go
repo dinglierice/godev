@@ -1,6 +1,7 @@
 package one_basic
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"sync"
@@ -148,4 +149,111 @@ func TestPrimeFilter(t *testing.T) {
 		fmt.Println(prime)
 		ch = PrimeFilter(ch, prime)
 	}
+}
+
+// 并发的安全退出
+func TestConcurrentSafeExit(t *testing.T) {
+	ch := make(chan int)
+	select {
+	case v := <-ch:
+		fmt.Println("hello world " + strconv.Itoa(v))
+	case <-time.After(time.Second * 5):
+		fmt.Println("timeout")
+	default:
+	}
+}
+
+// goroutine 退出控制
+func worker4ExitControl(cancel chan bool) {
+	for {
+		select {
+		default:
+			fmt.Println("hello world")
+		case v := <-cancel:
+			fmt.Println("receive cancel signal " + strconv.FormatBool(v))
+			fmt.Println("exit")
+			//return
+		}
+	}
+}
+
+// 存在交替执行的问题
+// 由于 select 的随机选择特性和 goroutine 的并发执行，"hello world" 的打印和取消信号的打印可能会交错
+// 例如，在发送取消信号的瞬间，select 可能已经选择了 default 分支，因此会先打印 "hello world"，然后再处理取消信号。
+func TestWorker4ExitControl(t *testing.T) {
+	cancel := make(chan bool)
+	go worker4ExitControl(cancel)
+	time.Sleep(time.Second * 2)
+	cancel <- true
+}
+
+// 关闭通道
+// 广播关闭通道
+func TestWorker4ExitControlWithCloseCmd(t *testing.T) {
+	cancel := make(chan bool)
+	for i := 0; i < 10; i++ {
+		go worker4ExitControl(cancel)
+	}
+	time.Sleep(time.Second * 2)
+	close(cancel)
+}
+
+// 因为 main 线程并没有等待各个工作 Goroutine 退出工作完成的机制
+// 结合上面乱序输出的问题, 测试使用sync.WaitGroup
+func workerWithWg(wg *sync.WaitGroup, cancel chan bool) {
+	defer wg.Done()
+	for {
+		select {
+		default:
+			fmt.Println("hello world")
+		case v := <-cancel:
+			fmt.Println("receive cancel signal " + strconv.FormatBool(v))
+			fmt.Println("exit")
+			return
+		}
+	}
+}
+
+// 测试使用sync.WaitGroup
+func TestWorker4ExitControlWithWg(t *testing.T) {
+	cancel := make(chan bool)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go workerWithWg(&wg, cancel)
+	}
+
+	time.Sleep(time.Second * 2)
+	close(cancel)
+	wg.Wait()
+}
+
+// 并发withContext
+// 标准库增加了一个 context 包，用来简化对于处理单个请求的多个 Goroutine 之间与请求域的数据、超时和退出等操作
+// 我们可以用 context 包来重新实现前面的线程安全退出或超时的控制
+func workWithContext(wg *sync.WaitGroup, ctx context.Context) error {
+	defer wg.Done()
+	for {
+		select {
+		default:
+			fmt.Println("hello world")
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func TestWithWorkWithContext(t *testing.T) {
+	var wg sync.WaitGroup
+	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*2)
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go workWithContext(&wg, ctx)
+	}
+	time.Sleep(time.Second * 3)
+	cancelFunc()
+
+	wg.Wait()
 }
